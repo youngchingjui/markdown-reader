@@ -13,6 +13,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources/MarkdownReader
+      - path: resources/AppIcon.icns
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.youngchingjui.MarkdownReader
@@ -26,3 +28,4 @@ targets:
         INFOPLIST_FILE: Sources/MarkdownReader/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/MarkdownReader/MarkdownReader.entitlements
         ENABLE_HARDENED_RUNTIME: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

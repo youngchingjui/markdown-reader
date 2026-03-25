@@ -6,7 +6,11 @@ final class AppState {
     var fileURL: URL?
     var fileName: String = "MarkdownReader"
     var showFileImporter: Bool = false
+    var showFolderImporter: Bool = false
+    var showQuickOpen: Bool = false
     var fontSize: CGFloat = 17
+
+    let workspaceManager = WorkspaceManager()
 
     private let minFontSize: CGFloat = 12
     private let maxFontSize: CGFloat = 28
@@ -22,6 +26,14 @@ final class AppState {
         } catch {
             markdownContent = "**Error:** Could not read file.\n\n`\(error.localizedDescription)`"
             fileName = "Error"
+        }
+    }
+
+    func loadWorkspaceFile(_ file: MarkdownFile) {
+        if let content = workspaceManager.loadFile(file) {
+            markdownContent = content
+            fileURL = file.url
+            fileName = file.name
         }
     }
 

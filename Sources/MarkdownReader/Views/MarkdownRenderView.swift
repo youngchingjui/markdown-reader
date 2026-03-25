@@ -60,9 +60,10 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
 
     var inCodeBlock = false
     var codeBlockLines: [String] = []
-    var codeBlockLanguage = "" // reserved for future syntax highlighting
+    var codeBlockLanguage = ""
     var inBlockquote = false
     var blockquoteLines: [String] = []
+    var tableLines: [String] = []
 
     func flushBlockquote() {
         guard !blockquoteLines.isEmpty else { return }
@@ -78,11 +79,7 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             .foregroundColor: NSColor.secondaryLabelColor,
             .paragraphStyle: bqStyle,
         ])
-
-        // Add a left border via an attachment isn't straightforward,
-        // so we use italic to visually differentiate blockquotes
         bqAttr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize).italic(), range: NSRange(location: 0, length: bqAttr.length))
-
         result.append(bqAttr)
         blockquoteLines.removeAll()
         inBlockquote = false
@@ -97,17 +94,123 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
         codeStyle.paragraphSpacingBefore = fontSize * 0.4
         codeStyle.paragraphSpacing = fontSize * 0.4
 
-        let codeAttr = NSMutableAttributedString(string: code + "\n\n", attributes: [
+        let textBlock = NSTextBlock()
+        textBlock.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.15)
+        textBlock.setContentWidth(100, type: .percentageValueType)
+        textBlock.setWidth(12, type: .absoluteValueType, for: .padding)
+        textBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .minY)
+        textBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .maxY)
+        codeStyle.textBlocks = [textBlock]
+
+        let codeAttr = NSMutableAttributedString(string: code + "\n", attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular),
             .foregroundColor: NSColor.textColor.withAlphaComponent(0.85),
-            .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.15),
             .paragraphStyle: codeStyle,
         ])
 
         result.append(codeAttr)
+        let spacer = NSMutableParagraphStyle()
+        spacer.paragraphSpacing = fontSize * 0.4
+        result.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .paragraphStyle: spacer]))
+
         codeBlockLines.removeAll()
         codeBlockLanguage = ""
         inCodeBlock = false
+    }
+
+    func flushTable() {
+        guard !tableLines.isEmpty else { return }
+
+        // Parse table rows into cells
+        var rows: [[String]] = []
+        var hasSeparator = false
+
+        for (i, line) in tableLines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let stripped = trimmed.hasPrefix("|") ? String(trimmed.dropFirst()) : trimmed
+            let endStripped = stripped.hasSuffix("|") ? String(stripped.dropLast()) : stripped
+
+            // Check if separator row (e.g. |---|---|)
+            let isSeparator = endStripped.split(separator: "|").allSatisfy { cell in
+                let c = cell.trimmingCharacters(in: .whitespaces)
+                return c.allSatisfy({ $0 == "-" || $0 == ":" }) && c.count >= 1
+            }
+
+            if isSeparator && i > 0 {
+                hasSeparator = true
+                continue
+            }
+
+            let cells = endStripped.split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            rows.append(cells)
+        }
+
+        guard !rows.isEmpty else { tableLines.removeAll(); return }
+
+        let colCount = rows.map(\.count).max() ?? 0
+        var colWidths = [Int](repeating: 0, count: colCount)
+        for row in rows {
+            for (j, cell) in row.enumerated() where j < colCount {
+                colWidths[j] = max(colWidths[j], cell.count)
+            }
+        }
+
+        let tableFont = NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular)
+        let tableBoldFont = NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .semibold)
+
+        let tableStyle = NSMutableParagraphStyle()
+        tableStyle.lineSpacing = fontSize * 0.15
+        tableStyle.paragraphSpacing = 0
+
+        let tableBlock = NSTextBlock()
+        tableBlock.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.08)
+        tableBlock.setContentWidth(100, type: .percentageValueType)
+        tableBlock.setWidth(12, type: .absoluteValueType, for: .padding)
+        tableBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .minY)
+        tableBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .maxY)
+        tableStyle.textBlocks = [tableBlock]
+
+        var tableText = ""
+        for (i, row) in rows.enumerated() {
+            var line = ""
+            for j in 0..<colCount {
+                let cell = j < row.count ? row[j] : ""
+                let padded = cell.padding(toLength: colWidths[j], withPad: " ", startingAt: 0)
+                if j > 0 { line += "  │  " }
+                line += padded
+            }
+            tableText += line + "\n"
+
+            // Add separator after header row
+            if i == 0 && hasSeparator {
+                var sep = ""
+                for j in 0..<colCount {
+                    if j > 0 { sep += "──┼──" }
+                    sep += String(repeating: "─", count: colWidths[j])
+                }
+                tableText += sep + "\n"
+            }
+        }
+
+        let tableAttr = NSMutableAttributedString(string: tableText, attributes: [
+            .font: tableFont,
+            .foregroundColor: bodyColor,
+            .paragraphStyle: tableStyle,
+        ])
+
+        // Bold the header row
+        if hasSeparator, let firstNewline = tableText.firstIndex(of: "\n") {
+            let headerLength = tableText.distance(from: tableText.startIndex, to: firstNewline)
+            tableAttr.addAttribute(.font, value: tableBoldFont, range: NSRange(location: 0, length: headerLength))
+        }
+
+        result.append(tableAttr)
+        let spacer = NSMutableParagraphStyle()
+        spacer.paragraphSpacing = fontSize * 0.4
+        result.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .paragraphStyle: spacer]))
+
+        tableLines.removeAll()
     }
 
     for line in lines {
@@ -117,6 +220,7 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
                 flushCodeBlock()
             } else {
                 flushBlockquote()
+                flushTable()
                 inCodeBlock = true
                 codeBlockLanguage = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
             }
@@ -126,6 +230,16 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
         if inCodeBlock {
             codeBlockLines.append(line)
             continue
+        }
+
+        // Table detection: lines that contain | and look like table rows
+        let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+        if trimmedLine.hasPrefix("|") && trimmedLine.hasSuffix("|") {
+            flushBlockquote()
+            tableLines.append(line)
+            continue
+        } else if !tableLines.isEmpty {
+            flushTable()
         }
 
         // Blockquotes
@@ -152,35 +266,19 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
         }
 
         // Headings
-        if line.hasPrefix("# ") {
+        if line.hasPrefix("#### ") {
             flushBlockquote()
-            let text = String(line.dropFirst(2))
+            let text = String(line.dropFirst(5))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.6
-            headingStyle.paragraphSpacing = fontSize * 0.6
-            headingStyle.lineSpacing = fontSize * 0.2
+            headingStyle.paragraphSpacingBefore = fontSize * 1.0
+            headingStyle.paragraphSpacing = fontSize * 0.2
 
-            result.append(NSAttributedString(string: text + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize * 2.0, weight: .bold),
-                .foregroundColor: bodyColor,
-                .paragraphStyle: headingStyle,
-            ]))
-            continue
-        }
-
-        if line.hasPrefix("## ") {
-            flushBlockquote()
-            let text = String(line.dropFirst(3))
-            let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.4
-            headingStyle.paragraphSpacing = fontSize * 0.4
-            headingStyle.lineSpacing = fontSize * 0.2
-
-            result.append(NSAttributedString(string: text + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize * 1.6, weight: .semibold),
-                .foregroundColor: bodyColor,
-                .paragraphStyle: headingStyle,
-            ]))
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.1,
+                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.1, weight: .semibold),
+                bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
+            styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
+            result.append(styledText)
             continue
         }
 
@@ -192,32 +290,53 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             headingStyle.paragraphSpacing = fontSize * 0.3
             headingStyle.lineSpacing = fontSize * 0.2
 
-            result.append(NSAttributedString(string: text + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize * 1.3, weight: .semibold),
-                .foregroundColor: bodyColor,
-                .paragraphStyle: headingStyle,
-            ]))
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.3,
+                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.3, weight: .semibold),
+                bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
+            styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
+            result.append(styledText)
             continue
         }
 
-        if line.hasPrefix("#### ") {
+        if line.hasPrefix("## ") {
             flushBlockquote()
-            let text = String(line.dropFirst(5))
+            let text = String(line.dropFirst(3))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.0
-            headingStyle.paragraphSpacing = fontSize * 0.2
+            headingStyle.paragraphSpacingBefore = fontSize * 1.4
+            headingStyle.paragraphSpacing = fontSize * 0.4
+            headingStyle.lineSpacing = fontSize * 0.2
 
-            result.append(NSAttributedString(string: text + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: fontSize * 1.1, weight: .semibold),
-                .foregroundColor: bodyColor,
-                .paragraphStyle: headingStyle,
-            ]))
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.6,
+                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.6, weight: .semibold),
+                bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
+            styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
+            result.append(styledText)
+            continue
+        }
+
+        if line.hasPrefix("# ") {
+            flushBlockquote()
+            let text = String(line.dropFirst(2))
+            let headingStyle = NSMutableParagraphStyle()
+            headingStyle.paragraphSpacingBefore = fontSize * 1.6
+            headingStyle.paragraphSpacing = fontSize * 0.6
+            headingStyle.lineSpacing = fontSize * 0.2
+
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 2.0,
+                bodyFont: NSFont.systemFont(ofSize: fontSize * 2.0, weight: .bold),
+                bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
+            styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
+            result.append(styledText)
             continue
         }
 
         // Horizontal rule
-        if line.trimmingCharacters(in: .whitespaces).allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" })
-            && line.trimmingCharacters(in: .whitespaces).count >= 3
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" })
+            && trimmed.count >= 3
         {
             let hrStyle = NSMutableParagraphStyle()
             hrStyle.paragraphSpacingBefore = fontSize
@@ -232,7 +351,6 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
         }
 
         // Unordered list items
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
             let indent = line.prefix(while: { $0 == " " || $0 == "\t" }).count
             let text = String(trimmed.dropFirst(2))
@@ -245,7 +363,8 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             listStyle.firstLineHeadIndent = baseIndent - 16
 
             let bullet = "•  "
-            let styledText = applyInlineStyles(to: bullet + text + "\n", fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+            let styledText = applyInlineStyles(to: bullet + text, fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: listStyle, range: NSRange(location: 0, length: styledText.length))
             result.append(styledText)
             continue
@@ -262,14 +381,16 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             listStyle.headIndent = 28
             listStyle.firstLineHeadIndent = 4
 
-            let styledText = applyInlineStyles(to: number + " " + text + "\n", fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+            let styledText = applyInlineStyles(to: number + " " + text, fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+            styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: listStyle, range: NSRange(location: 0, length: styledText.length))
             result.append(styledText)
             continue
         }
 
         // Regular paragraph
-        let styledText = applyInlineStyles(to: line + "\n", fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+        let styledText = applyInlineStyles(to: line, fontSize: fontSize, bodyFont: bodyFont, bodyColor: bodyColor)
+        styledText.append(NSAttributedString(string: "\n"))
         styledText.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: styledText.length))
         result.append(styledText)
     }
@@ -277,11 +398,12 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
     // Flush any remaining blocks
     flushBlockquote()
     flushCodeBlock()
+    flushTable()
 
     return result
 }
 
-// MARK: - Inline style rendering (bold, italic, code, links)
+// MARK: - Inline style rendering (bold, italic, code, links) with delimiter stripping
 
 private func applyInlineStyles(
     to text: String,
@@ -294,83 +416,91 @@ private func applyInlineStyles(
         .foregroundColor: bodyColor,
     ])
 
-    // Inline code: `code`
-    applyPattern(#"`([^`]+)`"#, to: result, fontSize: fontSize) { range, match in
-        let codeFont = NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular)
-        result.addAttributes([
-            .font: codeFont,
+    // Links: [text](url)
+    stripAndReplace(pattern: #"\[([^\]]+)\]\(([^)]+)\)"#, in: result) { match, nsString in
+        let linkText = nsString.substring(with: match.range(at: 1))
+        let urlString = nsString.substring(with: match.range(at: 2))
+        let replacement = NSMutableAttributedString(string: linkText, attributes: [
+            .font: bodyFont,
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ])
+        if let url = URL(string: urlString) {
+            replacement.addAttribute(.link, value: url, range: NSRange(location: 0, length: linkText.count))
+        }
+        return replacement
+    }
+
+    // Inline code: `code` — process before bold/italic to avoid conflicts
+    stripAndReplace(pattern: #"`([^`]+)`"#, in: result) { match, nsString in
+        let code = nsString.substring(with: match.range(at: 1))
+        return NSMutableAttributedString(string: code, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular),
             .foregroundColor: NSColor.systemOrange.blended(withFraction: 0.3, of: bodyColor) ?? bodyColor,
             .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.2),
-        ], range: range)
+        ])
     }
 
     // Bold+Italic: ***text*** or ___text___
-    applyPattern(#"(\*\*\*|___)(.+?)\1"#, to: result, fontSize: fontSize) { range, match in
-        let boldItalicFont = NSFont.systemFont(ofSize: fontSize, weight: .bold).italic()
-        result.addAttribute(.font, value: boldItalicFont, range: range)
+    stripAndReplace(pattern: #"(\*\*\*|___)(.+?)\1"#, in: result) { match, nsString in
+        let content = nsString.substring(with: match.range(at: 2))
+        return NSMutableAttributedString(string: content, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold).italic(),
+            .foregroundColor: bodyColor,
+        ])
     }
 
     // Bold: **text** or __text__
-    applyPattern(#"(\*\*|__)(.+?)\1"#, to: result, fontSize: fontSize) { range, match in
-        let boldFont = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
-        result.addAttribute(.font, value: boldFont, range: range)
+    stripAndReplace(pattern: #"(\*\*|__)(.+?)\1"#, in: result) { match, nsString in
+        let content = nsString.substring(with: match.range(at: 2))
+        return NSMutableAttributedString(string: content, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: bodyColor,
+        ])
     }
 
-    // Italic: *text* or _text_
-    applyPattern(#"(?<!\*)(\*|_)(?!\*)(.+?)(?<!\*)\1(?!\*)"#, to: result, fontSize: fontSize) { range, match in
-        let italicFont = NSFont.systemFont(ofSize: fontSize, weight: .regular).italic()
-        result.addAttribute(.font, value: italicFont, range: range)
+    // Italic: *text* or _text_ (avoid matching mid-word underscores)
+    stripAndReplace(pattern: #"\*([^*\n]+?)\*"#, in: result) { match, nsString in
+        let content = nsString.substring(with: match.range(at: 1))
+        return NSMutableAttributedString(string: content, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .regular).italic(),
+            .foregroundColor: bodyColor,
+        ])
     }
-
-    // Links: [text](url)
-    let linkPattern = #"\[([^\]]+)\]\(([^)]+)\)"#
-    if let regex = try? NSRegularExpression(pattern: linkPattern) {
-        let nsString = result.string as NSString
-        let matches = regex.matches(in: result.string, range: NSRange(location: 0, length: nsString.length))
-
-        for match in matches.reversed() {
-            let fullRange = match.range
-            let textRange = match.range(at: 1)
-            let urlRange = match.range(at: 2)
-
-            let linkText = nsString.substring(with: textRange)
-            let urlString = nsString.substring(with: urlRange)
-
-            let replacement = NSMutableAttributedString(string: linkText, attributes: [
-                .font: bodyFont,
-                .foregroundColor: NSColor.linkColor,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ])
-
-            if let url = URL(string: urlString) {
-                replacement.addAttribute(.link, value: url, range: NSRange(location: 0, length: linkText.count))
-            }
-
-            result.replaceCharacters(in: fullRange, with: replacement)
-        }
+    stripAndReplace(pattern: #"(?<!\w)_([^_\n]+?)_(?!\w)"#, in: result) { match, nsString in
+        let content = nsString.substring(with: match.range(at: 1))
+        return NSMutableAttributedString(string: content, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .regular).italic(),
+            .foregroundColor: bodyColor,
+        ])
     }
 
     // Strikethrough: ~~text~~
-    applyPattern(#"~~(.+?)~~"#, to: result, fontSize: fontSize) { range, _ in
-        result.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
-        result.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: range)
+    stripAndReplace(pattern: #"~~(.+?)~~"#, in: result) { match, nsString in
+        let content = nsString.substring(with: match.range(at: 1))
+        return NSMutableAttributedString(string: content, attributes: [
+            .font: bodyFont,
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+        ])
     }
 
     return result
 }
 
-private func applyPattern(
-    _ pattern: String,
-    to attributedString: NSMutableAttributedString,
-    fontSize: CGFloat,
-    handler: (NSRange, NSTextCheckingResult) -> Void
+/// Find regex matches and replace each with a styled attributed string (processes in reverse to preserve indices)
+private func stripAndReplace(
+    pattern: String,
+    in attributedString: NSMutableAttributedString,
+    replacement: (NSTextCheckingResult, NSString) -> NSMutableAttributedString
 ) {
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
     let nsString = attributedString.string as NSString
     let matches = regex.matches(in: attributedString.string, range: NSRange(location: 0, length: nsString.length))
 
     for match in matches.reversed() {
-        handler(match.range, match)
+        let rep = replacement(match, nsString)
+        attributedString.replaceCharacters(in: match.range, with: rep)
     }
 }
 

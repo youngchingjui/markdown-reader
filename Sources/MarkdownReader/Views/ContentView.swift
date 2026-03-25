@@ -7,14 +7,31 @@ struct ContentView: View {
     var body: some View {
         @Bindable var state = appState
 
-        Group {
-            if appState.markdownContent.isEmpty {
-                WelcomeView()
-            } else {
-                MarkdownRenderView(
-                    markdown: appState.markdownContent,
-                    fontSize: appState.fontSize
-                )
+        NavigationSplitView {
+            SidebarView()
+        } detail: {
+            ZStack {
+                if appState.markdownContent.isEmpty {
+                    WelcomeView()
+                } else {
+                    MarkdownRenderView(
+                        markdown: appState.markdownContent,
+                        fontSize: appState.fontSize
+                    )
+                }
+
+                // Quick Open overlay
+                if appState.showQuickOpen {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture { appState.showQuickOpen = false }
+
+                    VStack {
+                        QuickOpenView()
+                            .padding(.top, 60)
+                        Spacer()
+                    }
+                }
             }
         }
         .navigationTitle(appState.fileName)
@@ -23,6 +40,12 @@ struct ContentView: View {
                 Button(action: { appState.showFileImporter = true }) {
                     Label("Open", systemImage: "doc.text")
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { appState.showQuickOpen.toggle() }) {
+                    Label("Quick Open", systemImage: "magnifyingglass")
+                }
+                .keyboardShortcut("p", modifiers: .command)
             }
         }
         .fileImporter(
@@ -34,6 +57,20 @@ struct ContentView: View {
             case .success(let urls):
                 if let url = urls.first {
                     appState.loadFile(from: url)
+                }
+            case .failure:
+                break
+            }
+        }
+        .fileImporter(
+            isPresented: $state.showFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first {
+                    appState.workspaceManager.addFolder(url: url)
                 }
             case .failure:
                 break

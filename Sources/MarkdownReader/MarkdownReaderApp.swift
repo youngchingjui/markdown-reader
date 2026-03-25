@@ -20,13 +20,32 @@ struct MarkdownReaderApp: App {
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
-        .defaultSize(width: 800, height: 900)
+        .defaultSize(width: 1000, height: 900)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open...") {
                     appState.showFileImporter = true
                 }
                 .keyboardShortcut("o", modifiers: .command)
+
+                Button("Quick Open") {
+                    appState.showQuickOpen.toggle()
+                }
+                .keyboardShortcut("p", modifiers: .command)
+
+                Divider()
+
+                Button("Add Workspace Folder...") {
+                    appState.showFolderImporter = true
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+
+                if !appState.workspaceManager.folders.isEmpty {
+                    Divider()
+                    Button("Rescan Workspaces") {
+                        appState.workspaceManager.rescanAll()
+                    }
+                }
             }
             CommandGroup(after: .textFormatting) {
                 Divider()

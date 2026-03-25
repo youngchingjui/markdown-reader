@@ -1,92 +1,23 @@
 #!/bin/bash
+# Build MarkdownReader with xcodebuild and install to /Applications
+
 set -e
+cd "$(dirname "$0")"
 
 APP_NAME="MarkdownReader"
-BUILD_DIR=".build/debug"
-APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+DERIVED_DATA="build/DerivedData"
 
-echo "Building $APP_NAME..."
-swift build
+echo "Building $APP_NAME with xcodebuild..."
+xcodebuild -scheme "$APP_NAME" -configuration Release -derivedDataPath "$DERIVED_DATA" -destination 'platform=macOS' build 2>&1 | tail -5
 
-echo "Creating app bundle..."
-rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources"
+BUILT_APP="$DERIVED_DATA/Build/Products/Release/${APP_NAME}.app"
 
-# Copy executable
-cp "$BUILD_DIR/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+if [ ! -d "$BUILT_APP" ]; then
+    echo "Error: Build output not found at $BUILT_APP"
+    exit 1
+fi
 
-# Create Info.plist with resolved variables
-cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>CFBundleName</key>
-	<string>MarkdownReader</string>
-	<key>CFBundleDisplayName</key>
-	<string>Markdown Reader</string>
-	<key>CFBundleIdentifier</key>
-	<string>com.youngchingjui.MarkdownReader</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleExecutable</key>
-	<string>MarkdownReader</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
-	<key>CFBundleDocumentTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeName</key>
-			<string>Markdown Document</string>
-			<key>CFBundleTypeRole</key>
-			<string>Viewer</string>
-			<key>LSHandlerRank</key>
-			<string>Alternate</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>net.daringfireball.markdown</string>
-				<string>public.plain-text</string>
-			</array>
-			<key>CFBundleTypeExtensions</key>
-			<array>
-				<string>md</string>
-				<string>markdown</string>
-				<string>mdown</string>
-				<string>mkd</string>
-			</array>
-		</dict>
-	</array>
-	<key>UTImportedTypeDeclarations</key>
-	<array>
-		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>net.daringfireball.markdown</string>
-			<key>UTTypeDescription</key>
-			<string>Markdown Document</string>
-			<key>UTTypeConformsTo</key>
-			<array>
-				<string>public.plain-text</string>
-			</array>
-			<key>UTTypeTagSpecification</key>
-			<dict>
-				<key>public.filename-extension</key>
-				<array>
-					<string>md</string>
-					<string>markdown</string>
-					<string>mdown</string>
-					<string>mkd</string>
-				</array>
-			</dict>
-		</dict>
-	</array>
-</dict>
-</plist>
-PLIST
-
-echo "Done! Opening $APP_NAME..."
-open "$APP_BUNDLE"
+echo "Installing to /Applications..."
+rm -rf "/Applications/${APP_NAME}.app"
+cp -r "$BUILT_APP" /Applications/
+echo "Done! $APP_NAME is installed at /Applications/${APP_NAME}.app"
