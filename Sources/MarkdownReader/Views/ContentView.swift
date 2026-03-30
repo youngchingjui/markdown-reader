@@ -62,20 +62,6 @@ struct ContentView: View {
                 break
             }
         }
-        .fileImporter(
-            isPresented: $state.showFolderImporter,
-            allowedContentTypes: [.folder],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                if let url = urls.first {
-                    appState.workspaceManager.addFolder(url: url)
-                }
-            case .failure:
-                break
-            }
-        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in

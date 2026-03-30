@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Highlighter
 
 struct MarkdownRenderView: NSViewRepresentable {
     let markdown: String
@@ -47,16 +48,27 @@ struct MarkdownRenderView: NSViewRepresentable {
 
 // MARK: - Markdown → NSAttributedString renderer
 
+private func serifFont(ofSize size: CGFloat, weight: NSFont.Weight) -> NSFont {
+    let systemFont = NSFont.systemFont(ofSize: size, weight: weight)
+    if let serifDescriptor = systemFont.fontDescriptor.withDesign(.serif) {
+        return NSFont(descriptor: serifDescriptor, size: size) ?? systemFont
+    }
+    return systemFont
+}
+
 private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttributedString {
     let result = NSMutableAttributedString()
     let lines = markdown.components(separatedBy: "\n")
 
-    let bodyFont = NSFont.systemFont(ofSize: fontSize, weight: .regular)
+    let bodyFont = serifFont(ofSize: fontSize, weight: .regular)
     let bodyColor = NSColor.textColor
 
+    let bodyLineHeight = fontSize * 1.6
     let paragraphStyle = NSMutableParagraphStyle()
-    paragraphStyle.lineSpacing = fontSize * 0.5
-    paragraphStyle.paragraphSpacing = fontSize * 0.8
+    paragraphStyle.minimumLineHeight = bodyLineHeight
+    paragraphStyle.maximumLineHeight = bodyLineHeight
+    paragraphStyle.lineSpacing = 0
+    paragraphStyle.paragraphSpacing = fontSize * 0.5
 
     var inCodeBlock = false
     var codeBlockLines: [String] = []
@@ -69,17 +81,17 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
         guard !blockquoteLines.isEmpty else { return }
         let text = blockquoteLines.joined(separator: "\n")
         let bqStyle = NSMutableParagraphStyle()
-        bqStyle.lineSpacing = fontSize * 0.4
-        bqStyle.paragraphSpacing = fontSize * 0.4
-        bqStyle.headIndent = 24
-        bqStyle.firstLineHeadIndent = 24
+        bqStyle.lineSpacing = fontSize * 0.45
+        bqStyle.paragraphSpacing = fontSize * 0.5
+        bqStyle.headIndent = 28
+        bqStyle.firstLineHeadIndent = 28
 
+        let bqFont = serifFont(ofSize: fontSize, weight: .regular).italic()
         let bqAttr = NSMutableAttributedString(string: text + "\n\n", attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .regular),
+            .font: bqFont,
             .foregroundColor: NSColor.secondaryLabelColor,
             .paragraphStyle: bqStyle,
         ])
-        bqAttr.addAttribute(.font, value: NSFont.systemFont(ofSize: fontSize).italic(), range: NSRange(location: 0, length: bqAttr.length))
         result.append(bqAttr)
         blockquoteLines.removeAll()
         inBlockquote = false
@@ -88,29 +100,56 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
     func flushCodeBlock() {
         guard !codeBlockLines.isEmpty else { return }
         let code = codeBlockLines.joined(separator: "\n")
+        let codeFontSize = fontSize * 0.82
+        let codeLineHeight = codeFontSize * 1.45
+        let codeFont = NSFont.monospacedSystemFont(ofSize: codeFontSize, weight: .regular)
 
         let codeStyle = NSMutableParagraphStyle()
-        codeStyle.lineSpacing = fontSize * 0.2
-        codeStyle.paragraphSpacingBefore = fontSize * 0.4
-        codeStyle.paragraphSpacing = fontSize * 0.4
+        codeStyle.minimumLineHeight = codeLineHeight
+        codeStyle.maximumLineHeight = codeLineHeight
+        codeStyle.lineSpacing = 0
+        codeStyle.paragraphSpacing = 0
 
         let textBlock = NSTextBlock()
-        textBlock.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.15)
+        textBlock.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.08)
         textBlock.setContentWidth(100, type: .percentageValueType)
         textBlock.setWidth(12, type: .absoluteValueType, for: .padding)
+        textBlock.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
+        textBlock.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
         textBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .minY)
         textBlock.setWidth(8, type: .absoluteValueType, for: .margin, edge: .maxY)
         codeStyle.textBlocks = [textBlock]
 
-        let codeAttr = NSMutableAttributedString(string: code + "\n", attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular),
-            .foregroundColor: NSColor.textColor.withAlphaComponent(0.85),
-            .paragraphStyle: codeStyle,
-        ])
+        // Try syntax highlighting
+        var codeAttr: NSMutableAttributedString
+        let lang = codeBlockLanguage.isEmpty ? nil : codeBlockLanguage
+        if let highlighter = Highlighter() {
+            highlighter.setTheme("atom-one-light")
+            highlighter.theme.setCodeFont(codeFont)
+            if let highlighted = highlighter.highlight(code, as: lang) {
+                codeAttr = NSMutableAttributedString(attributedString: highlighted)
+                codeAttr.append(NSAttributedString(string: "\n"))
+            } else {
+                codeAttr = NSMutableAttributedString(string: code + "\n", attributes: [
+                    .font: codeFont,
+                    .foregroundColor: NSColor.textColor.withAlphaComponent(0.75),
+                ])
+            }
+        } else {
+            codeAttr = NSMutableAttributedString(string: code + "\n", attributes: [
+                .font: codeFont,
+                .foregroundColor: NSColor.textColor.withAlphaComponent(0.75),
+            ])
+        }
+
+        // Apply paragraph style and font across entire range
+        let fullRange = NSRange(location: 0, length: codeAttr.length)
+        codeAttr.addAttribute(.paragraphStyle, value: codeStyle, range: fullRange)
+        codeAttr.addAttribute(.font, value: codeFont, range: fullRange)
 
         result.append(codeAttr)
         let spacer = NSMutableParagraphStyle()
-        spacer.paragraphSpacing = fontSize * 0.4
+        spacer.paragraphSpacing = fontSize * 0.3
         result.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .paragraphStyle: spacer]))
 
         codeBlockLines.removeAll()
@@ -270,11 +309,11 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             flushBlockquote()
             let text = String(line.dropFirst(5))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.0
-            headingStyle.paragraphSpacing = fontSize * 0.2
+            headingStyle.paragraphSpacingBefore = fontSize * 1.2
+            headingStyle.paragraphSpacing = fontSize * 0.3
 
-            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.1,
-                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.1, weight: .semibold),
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.05,
+                bodyFont: serifFont(ofSize: fontSize * 1.05, weight: .semibold),
                 bodyColor: bodyColor)
             styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
@@ -286,12 +325,12 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             flushBlockquote()
             let text = String(line.dropFirst(4))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.2
-            headingStyle.paragraphSpacing = fontSize * 0.3
+            headingStyle.paragraphSpacingBefore = fontSize * 1.4
+            headingStyle.paragraphSpacing = fontSize * 0.35
             headingStyle.lineSpacing = fontSize * 0.2
 
-            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.3,
-                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.3, weight: .semibold),
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.2,
+                bodyFont: serifFont(ofSize: fontSize * 1.2, weight: .semibold),
                 bodyColor: bodyColor)
             styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
@@ -303,12 +342,12 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             flushBlockquote()
             let text = String(line.dropFirst(3))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.4
-            headingStyle.paragraphSpacing = fontSize * 0.4
+            headingStyle.paragraphSpacingBefore = fontSize * 1.8
+            headingStyle.paragraphSpacing = fontSize * 0.5
             headingStyle.lineSpacing = fontSize * 0.2
 
-            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.6,
-                bodyFont: NSFont.systemFont(ofSize: fontSize * 1.6, weight: .semibold),
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 1.5,
+                bodyFont: serifFont(ofSize: fontSize * 1.5, weight: .semibold),
                 bodyColor: bodyColor)
             styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
@@ -320,12 +359,12 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             flushBlockquote()
             let text = String(line.dropFirst(2))
             let headingStyle = NSMutableParagraphStyle()
-            headingStyle.paragraphSpacingBefore = fontSize * 1.6
-            headingStyle.paragraphSpacing = fontSize * 0.6
+            headingStyle.paragraphSpacingBefore = fontSize * 2.0
+            headingStyle.paragraphSpacing = fontSize * 0.8
             headingStyle.lineSpacing = fontSize * 0.2
 
-            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 2.0,
-                bodyFont: NSFont.systemFont(ofSize: fontSize * 2.0, weight: .bold),
+            let styledText = applyInlineStyles(to: text, fontSize: fontSize * 2.2,
+                bodyFont: serifFont(ofSize: fontSize * 2.2, weight: .bold),
                 bodyColor: bodyColor)
             styledText.append(NSAttributedString(string: "\n"))
             styledText.addAttribute(.paragraphStyle, value: headingStyle, range: NSRange(location: 0, length: styledText.length))
@@ -356,8 +395,10 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             let text = String(trimmed.dropFirst(2))
 
             let listStyle = NSMutableParagraphStyle()
-            listStyle.lineSpacing = fontSize * 0.35
-            listStyle.paragraphSpacing = fontSize * 0.2
+            listStyle.minimumLineHeight = bodyLineHeight
+            listStyle.maximumLineHeight = bodyLineHeight
+            listStyle.lineSpacing = 0
+            listStyle.paragraphSpacing = fontSize * 0.15
             let baseIndent: CGFloat = CGFloat(indent / 2) * 20 + 24
             listStyle.headIndent = baseIndent
             listStyle.firstLineHeadIndent = baseIndent - 16
@@ -376,8 +417,10 @@ private func renderMarkdown(_ markdown: String, fontSize: CGFloat) -> NSAttribut
             let text = String(trimmed[match.upperBound...])
 
             let listStyle = NSMutableParagraphStyle()
-            listStyle.lineSpacing = fontSize * 0.35
-            listStyle.paragraphSpacing = fontSize * 0.2
+            listStyle.minimumLineHeight = bodyLineHeight
+            listStyle.maximumLineHeight = bodyLineHeight
+            listStyle.lineSpacing = 0
+            listStyle.paragraphSpacing = fontSize * 0.15
             listStyle.headIndent = 28
             listStyle.firstLineHeadIndent = 4
 
@@ -422,7 +465,7 @@ private func applyInlineStyles(
         let urlString = nsString.substring(with: match.range(at: 2))
         let replacement = NSMutableAttributedString(string: linkText, attributes: [
             .font: bodyFont,
-            .foregroundColor: NSColor.linkColor,
+            .foregroundColor: NSColor.controlAccentColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
         ])
         if let url = URL(string: urlString) {
@@ -434,10 +477,11 @@ private func applyInlineStyles(
     // Inline code: `code` — process before bold/italic to avoid conflicts
     stripAndReplace(pattern: #"`([^`]+)`"#, in: result) { match, nsString in
         let code = nsString.substring(with: match.range(at: 1))
-        return NSMutableAttributedString(string: code, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: fontSize * 0.88, weight: .regular),
-            .foregroundColor: NSColor.systemOrange.blended(withFraction: 0.3, of: bodyColor) ?? bodyColor,
-            .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.2),
+        let inlineCodeFont = NSFont.monospacedSystemFont(ofSize: fontSize * 0.84, weight: .regular)
+        return NSMutableAttributedString(string: "\u{2006}" + code + "\u{2006}", attributes: [
+            .font: inlineCodeFont,
+            .foregroundColor: NSColor.textColor.withAlphaComponent(0.8),
+            .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.12),
         ])
     }
 
@@ -445,7 +489,7 @@ private func applyInlineStyles(
     stripAndReplace(pattern: #"(\*\*\*|___)(.+?)\1"#, in: result) { match, nsString in
         let content = nsString.substring(with: match.range(at: 2))
         return NSMutableAttributedString(string: content, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold).italic(),
+            .font: serifFont(ofSize: fontSize, weight: .bold).italic(),
             .foregroundColor: bodyColor,
         ])
     }
@@ -454,7 +498,7 @@ private func applyInlineStyles(
     stripAndReplace(pattern: #"(\*\*|__)(.+?)\1"#, in: result) { match, nsString in
         let content = nsString.substring(with: match.range(at: 2))
         return NSMutableAttributedString(string: content, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .font: serifFont(ofSize: fontSize, weight: .semibold),
             .foregroundColor: bodyColor,
         ])
     }
@@ -463,14 +507,14 @@ private func applyInlineStyles(
     stripAndReplace(pattern: #"\*([^*\n]+?)\*"#, in: result) { match, nsString in
         let content = nsString.substring(with: match.range(at: 1))
         return NSMutableAttributedString(string: content, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .regular).italic(),
+            .font: serifFont(ofSize: fontSize, weight: .regular).italic(),
             .foregroundColor: bodyColor,
         ])
     }
     stripAndReplace(pattern: #"(?<!\w)_([^_\n]+?)_(?!\w)"#, in: result) { match, nsString in
         let content = nsString.substring(with: match.range(at: 1))
         return NSMutableAttributedString(string: content, attributes: [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .regular).italic(),
+            .font: serifFont(ofSize: fontSize, weight: .regular).italic(),
             .foregroundColor: bodyColor,
         ])
     }
