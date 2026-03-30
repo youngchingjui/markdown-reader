@@ -81,6 +81,18 @@ struct SidebarView: View {
     }
 
     private func folderHeader(_ folder: WorkspaceFolder) -> some View {
+        FolderHeaderView(folder: folder) {
+            appState.workspaceManager.removeFolder(folder)
+        }
+    }
+}
+
+struct FolderHeaderView: View {
+    let folder: WorkspaceFolder
+    let onRemove: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
         HStack {
             Image(systemName: "folder.fill")
                 .foregroundStyle(.blue)
@@ -88,13 +100,19 @@ struct SidebarView: View {
             Text(folder.name)
                 .font(.system(size: 12, weight: .semibold))
             Spacer()
-            Button(action: { appState.workspaceManager.removeFolder(folder) }) {
+            Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.tertiary)
                     .font(.system(size: 11))
             }
             .buttonStyle(.plain)
             .help("Remove workspace")
+            .opacity(isHovering ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovering)
+        }
+        .padding(.trailing, 4)
+        .onHover { hovering in
+            isHovering = hovering
         }
     }
 }
