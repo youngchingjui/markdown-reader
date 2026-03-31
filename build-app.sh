@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build MarkdownReader with xcodebuild and install to /Applications
 
-set -e
+set -eo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="MarkdownReader"
